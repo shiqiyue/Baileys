@@ -18,6 +18,7 @@ export type WAMessageContent = proto.IMessage
 export type WAContactMessage = proto.ContactMessage
 export type WAContactsArrayMessage = proto.ContactsArrayMessage
 export type WAGroupInviteMessage = proto.GroupInviteMessage
+export type WAListMessage = proto.ListMessage
 export type WAMessageKey = proto.IMessageKey
 export type WATextMessage = proto.ExtendedTextMessage
 export type WAContextInfo = proto.IContextInfo
@@ -134,6 +135,10 @@ export type WAConnectOptions = {
      * this keeps pinging the phone to send the chats over
      * */
     queryChatsTillReceived?: boolean
+    /** max time for the phone to respond to a query */
+    maxQueryResponseTime?: number
+	/** Log QR to terminal or not */
+    logQR?: boolean
 }
 /** from: https://stackoverflow.com/questions/3809401/what-is-a-good-regular-expression-to-match-a-url */
 export const URL_REGEX = /[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)?/gi
@@ -327,6 +332,7 @@ export enum MessageType {
     contact = 'contactMessage',
     contactsArray = 'contactsArrayMessage',
     groupInviteMessage = 'groupInviteMessage',
+    listMessage = 'listMessage',
     location = 'locationMessage',
     liveLocation = 'liveLocationMessage',
 
