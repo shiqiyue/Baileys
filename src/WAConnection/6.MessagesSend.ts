@@ -81,9 +81,9 @@ export class WAConnection extends Base {
     }
     /**
      * Toggles disappearing messages for the given chat
-     * 
+     *
      * @param jid the chat to toggle
-     * @param ephemeralExpiration 0 to disable, enter any positive number to enable disappearing messages for the specified duration; 
+     * @param ephemeralExpiration 0 to disable, enter any positive number to enable disappearing messages for the specified duration;
      * For the default see WA_DEFAULT_EPHEMERAL
      */
     async toggleDisappearingMessages(jid: string, ephemeralExpiration?: number, opts: { waitForAck: boolean } = { waitForAck: true }) {
@@ -91,9 +91,9 @@ export class WAConnection extends Base {
             const tag = this.generateMessageTag(true)
             await this.setQuery([
                 [
-                    'group', 
-                    { id: tag, jid, type: 'prop', author: this.user.jid }, 
-                    [ [ 'ephemeral', { value: ephemeralExpiration.toString() }, null ] ] 
+                    'group',
+                    { id: tag, jid, type: 'prop', author: this.user.jid },
+                    [ [ 'ephemeral', { value: ephemeralExpiration.toString() }, null ] ]
                 ]
             ], [WAMetric.group, WAFlag.other], tag)
         } else {
@@ -112,14 +112,14 @@ export class WAConnection extends Base {
             case MessageType.text:
             case MessageType.extendedText:
                 if (typeof message === 'string') message = {text: message} as WATextMessage
-                
+
                 if ('text' in message) {
                     if (options.detectLinks !== false && message.text.match(URL_REGEX)) {
                         try {
                             message = await this.generateLinkPreview (message.text)
                         } catch (error) { // ignore if fails
                             this.logger.trace(`failed to generate link preview for message '${message.text}': ${error}`)
-                        } 
+                        }
                     }
                     m.extendedTextMessage = WAMessageProto.ExtendedTextMessage.fromObject(message as any)
                 } else {
@@ -195,7 +195,7 @@ export class WAConnection extends Base {
             didSaveToTmpPath
         } = await encryptedStream(media, mediaType, requiresOriginalForSomeProcessing)
          // url safe Base64 encode the SHA256 hash of the body
-        const fileEncSha256B64 = encodeURIComponent( 
+        const fileEncSha256B64 = encodeURIComponent(
             fileEncSha256.toString('base64')
             .replace(/\+/g, '-')
             .replace(/\//g, '_')
@@ -218,18 +218,18 @@ export class WAConnection extends Base {
         for (let host of json.hosts) {
             const auth = encodeURIComponent(json.auth) // the auth token
             const url = `https://${host.hostname}${MediaPathMap[mediaType]}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`
-            
+
             try {
                 const {body: responseText} = await this.fetchRequest(
-                    url, 
-                    'POST', 
-                    createReadStream(encBodyPath), 
-                    options.uploadAgent, 
+                    url,
+                    'POST',
+                    createReadStream(encBodyPath),
+                    options.uploadAgent,
                     { 'Content-Type': 'application/octet-stream' }
                 )
                 const result = JSON.parse(responseText)
                 mediaUrl = result?.url
-                
+
                 if (mediaUrl) break
                 else {
                     json = await this.refreshMediaConn(true)
@@ -279,7 +279,7 @@ export class WAConnection extends Base {
         const key = Object.keys(message)[0]
         const timestamp = unixTimestampSeconds(options.timestamp)
         const quoted = options.quoted
-        
+
         if (options.contextInfo) message[key].contextInfo = options.contextInfo
 
         if (quoted) {
@@ -289,7 +289,7 @@ export class WAConnection extends Base {
             message[key].contextInfo.participant = participant
             message[key].contextInfo.stanzaId = quoted.key.id
             message[key].contextInfo.quotedMessage = quoted.message
-            
+
             // if a participant is quoted, then it must be a group
             // hence, remoteJid of group must also be entered
             if (quoted.key.participant) {
@@ -303,12 +303,12 @@ export class WAConnection extends Base {
         const chat = this.chats.get(id)
         if (
             // if we want to send a disappearing message
-            ((options?.sendEphemeral === 'chat' && chat?.ephemeral) || 
+            ((options?.sendEphemeral === 'chat' && chat?.ephemeral) ||
             options?.sendEphemeral === true) &&
             // and it's not a protocol message -- delete, toggle disappear message
             key !== 'protocolMessage' &&
             // already not converted to disappearing message
-            key !== 'ephemeralMessage' 
+            key !== 'ephemeralMessage'
         ) {
             message[key].contextInfo = {
                 ...(message[key].contextInfo || {}),
@@ -320,7 +320,7 @@ export class WAConnection extends Base {
                     message
                 }
             }
-        } 
+        }
         message = WAMessageProto.Message.fromObject (message)
 
         const messageJSON = {
@@ -344,10 +344,11 @@ export class WAConnection extends Base {
         const mID = message.key.id
         message.status = WA_MESSAGE_STATUS_TYPE.PENDING
         const promise = this.query({
-            json, 
-            binaryTags: [WAMetric.message, flag], 
-            tag: mID, 
+            json,
+            binaryTags: [WAMetric.message, flag],
+            tag: mID,
             expect200: true,
+            maxRetries: 0,
             requiresPhoneConnection: true
         })
         .then(() => message.status = WA_MESSAGE_STATUS_TYPE.SERVER_ACK)
@@ -368,18 +369,18 @@ export class WAConnection extends Base {
     /**
      * Fetches the latest url & media key for the given message.
      * You may need to call this when the message is old & the content is deleted off of the WA servers
-     * @param message 
+     * @param message
      */
     @Mutex (message => message?.key?.id)
     async updateMediaMessage (message: WAMessage) {
-        const content = message.message?.audioMessage || message.message?.videoMessage || message.message?.imageMessage || message.message?.stickerMessage || message.message?.documentMessage 
+        const content = message.message?.audioMessage || message.message?.videoMessage || message.message?.imageMessage || message.message?.stickerMessage || message.message?.documentMessage
         if (!content) throw new BaileysError (`given message ${message.key.id} is not a media message`, message)
-        
+
         const query = ['query',{type: 'media', index: message.key.id, owner: message.key.fromMe ? 'true' : 'false', jid: message.key.remoteJid, epoch: this.msgCount.toString()},null]
         const response = await this.query ({
-            json: query, 
-            binaryTags: [WAMetric.queryMedia, WAFlag.ignore], 
-            expect200: true, 
+            json: query,
+            binaryTags: [WAMetric.queryMedia, WAFlag.ignore],
+            expect200: true,
             requiresPhoneConnection: true
         })
         Object.keys (response[1]).forEach (key => content[key] = response[1][key]) // update message
@@ -388,7 +389,7 @@ export class WAConnection extends Base {
     async downloadMediaMessage (message: WAMessage, type: 'buffer'): Promise<Buffer>
     async downloadMediaMessage (message: WAMessage, type: 'stream'): Promise<Readable>
     /**
-     * Securely downloads the media from the message. 
+     * Securely downloads the media from the message.
      * Renews the download url automatically, if necessary.
      */
     @Mutex (message => message?.key?.id)
@@ -407,7 +408,7 @@ export class WAConnection extends Base {
             }
             return stream
         }
-        
+
         try {
             const buff = await downloadMediaMessage()
             return buff
@@ -423,7 +424,7 @@ export class WAConnection extends Base {
         }
     }
     /**
-     * Securely downloads the media from the message and saves to a file. 
+     * Securely downloads the media from the message and saves to a file.
      * Renews the download url automatically, if necessary.
      * @param message the media message you want to decode
      * @param filename the name of the file where the media will be saved
@@ -433,7 +434,7 @@ export class WAConnection extends Base {
         const extension = extensionForMediaMessage (message.message)
         const trueFileName = attachExtension ? (filename + '.' + extension) : filename
         const buffer = await this.downloadMediaMessage(message)
-        
+
         await fs.writeFile(trueFileName, buffer)
         return trueFileName
     }
