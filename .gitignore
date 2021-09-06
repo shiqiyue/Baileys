@@ -11,3 +11,11 @@ docs
 browser-token.json
 Proxy
 messages*.json
+### Example user template template
+### Example user template
+
+# IntelliJ project files
+.idea
+*.iml
+out
+gen
