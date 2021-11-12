@@ -1,6 +1,6 @@
 {
   "name": "shiqiyuebaileys",
-  "version": "3.5.15",
+  "version": "3.5.16",
   "description": "WhatsApp Web API",
   "homepage": "https://github.com/shiqiyue/Baileys",
   "main": "lib/index.js",
