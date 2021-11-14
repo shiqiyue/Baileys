@@ -11,6 +11,8 @@ docs
 browser-token.json
 Proxy
 messages*.json
+test.ts
+TestData
 ### Example user template template
 ### Example user template
 
