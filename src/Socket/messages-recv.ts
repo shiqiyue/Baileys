@@ -1,5 +1,5 @@
 
-import { SocketConfig, WAMessageStubType, ParticipantAction, Chat, GroupMetadata } from "../Types"
+import { SocketConfig, WAMessageStubType, ParticipantAction, Chat, GroupMetadata, WAMessageKey } from "../Types"
 import { decodeMessageStanza, encodeBigEndian, toNumber, downloadHistory, generateSignalPubKey, xmppPreKey, xmppSignedPreKey } from "../Utils"
 import { BinaryNode, jidDecode, jidEncode, isJidStatusBroadcast, areJidsSameUser, getBinaryNodeChildren, jidNormalizedUser, getAllBinaryNodeChildren, BinaryNodeAttributes } from '../WABinary'
 import { proto } from "../../WAProto"
@@ -22,6 +22,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
         sendDeliveryReceipt,
 	} = sock
 
+    const msgRetryMap = config.msgRetryCounterMap || { }
+
     const sendMessageAck = async({ tag, attrs }: BinaryNode, extraAttrs: BinaryNodeAttributes) => {
         const stanza: BinaryNode = {
             tag: 'ack',
@@ -39,7 +41,15 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
     }
 
     const sendRetryRequest = async(node: BinaryNode) => {
-        const retryCount = +(node.attrs.retryCount || 0) + 1
+        const msgId = node.attrs.id
+        const retryCount = msgRetryMap[msgId] || 1
+        if(retryCount >= 5) {
+            logger.debug({ retryCount, msgId }, 'reached retry limit, clearing')
+            delete msgRetryMap[msgId]
+            return
+        }
+        msgRetryMap[msgId] = retryCount+1
+
         const isGroup = !!node.attrs.participant
         const { account, signedPreKey, signedIdentityKey: identityKey } = authState.creds
         
@@ -52,7 +62,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             const receipt: BinaryNode = {
                 tag: 'receipt',
                 attrs: {
-                    id: node.attrs.id,
+                    id: msgId,
                     type: 'retry',
                     to: isGroup ? node.attrs.from : jidEncode(decFrom!.user, 's.whatsapp.net', decFrom!.device, 0)
                 },
@@ -81,7 +91,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             if(retryCount > 1) {
                 const exec = generateSignalPubKey(Buffer.from(KEY_BUNDLE_TYPE)).slice(0, 1);
 
-                (node.content! as BinaryNode[]).push({
+                (receipt.content! as BinaryNode[]).push({
                     tag: 'keys',
                     attrs: { },
                     content: [
@@ -93,11 +103,9 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                     ]
                 })
             }
-            await sendNode(node)
+            await sendNode(receipt)
 
-            logger.info({ msgId: node.attrs.id, retryCount }, 'sent retry receipt')
-
-            ev.emit('auth-state.update', authState)
+            logger.info({ msgAttrs: node.attrs, retryCount }, 'sent retry receipt')
         })
     }
     const processMessage = async(message: proto.IWebMessageInfo, chatUpdate: Partial<Chat>) => {
@@ -335,14 +343,28 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
     // recv a message
     ws.on('CB:message', async(stanza: BinaryNode) => {
         const dec = await decodeMessageStanza(stanza, authState)
-        const fullMessages: proto.IWebMessageInfo[] = []
-        for(const msg of dec.successes) {
-            const { attrs } = stanza
-            const isGroup = !!stanza.attrs.participant
-            const sender = (attrs.participant || attrs.from)?.toString()
-            const isMe = areJidsSameUser(sender, authState.creds.me!.id)
+        if(dec.successes.length) {
+            ev.emit('auth-state.update', authState)
+        }
 
-            // send delivery receipt
+        const fullMessages: proto.IWebMessageInfo[] = []
+
+        const { attrs } = stanza
+        const isGroup = !!stanza.attrs.participant
+        const sender = (attrs.participant || attrs.from)?.toString()
+        const isMe = areJidsSameUser(sender, authState.creds.me!.id)
+
+        const remoteJid = jidNormalizedUser(dec.chatId)
+        
+        const key: WAMessageKey = {
+            remoteJid,
+            fromMe: isMe,
+            id: dec.msgId,
+            participant: dec.participant
+        }
+
+        for(const msg of dec.successes) {
+            // send message receipt
             let recpAttrs: { [_: string]: any }
             if(isMe) {
                 recpAttrs =  {
@@ -376,35 +398,15 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             await sendDeliveryReceipt(dec.chatId, dec.participant, [dec.msgId])
             logger.debug({ msgId: dec.msgId }, 'sent delivery receipt')
 
-            const remoteJid = jidNormalizedUser(dec.chatId)
-
             const message = msg.deviceSentMessage?.message || msg
                 fullMessages.push({
-                    key: {
-                        remoteJid,
-                        fromMe: isMe,
-                        id: dec.msgId,
-                        participant: dec.participant
-                    },
+                    key,
                     message,
                     status: isMe ? proto.WebMessageInfo.WebMessageInfoStatus.SERVER_ACK : null,
                     messageTimestamp: dec.timestamp,
                     pushName: dec.pushname,
                     participant: dec.participant
                 })
-        }
-
-        if(dec.successes.length) {
-            ev.emit('auth-state.update', authState)
-            if(fullMessages.length) {
-                ev.emit(
-                    'messages.upsert', 
-                    { 
-                        messages: fullMessages.map(m => proto.WebMessageInfo.fromObject(m)), 
-                        type: stanza.attrs.offline ? 'append' : 'notify' 
-                    }
-                )
-            }
         }
         
 		for(const { error } of dec.failures) {
@@ -413,6 +415,22 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                 'failure in decrypting message'
             )
             await sendRetryRequest(stanza)
+            
+            fullMessages.push({
+                key,
+                messageStubType: WAMessageStubType.CIPHERTEXT,
+                messageStubParameters: [error.message]
+            })
+        }
+
+        if(fullMessages.length) {
+            ev.emit(
+                'messages.upsert', 
+                { 
+                    messages: fullMessages.map(m => proto.WebMessageInfo.fromObject(m)), 
+                    type: stanza.attrs.offline ? 'append' : 'notify' 
+                }
+            )
         }
     })
 

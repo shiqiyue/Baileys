@@ -274,6 +274,22 @@ const sentMsg  = await conn.sendMessage(
         }
     }
 )
+
+// send a buttons message!
+const buttons = [
+  {buttonId: 'id1', buttonText: {displayText: 'Button 1'}, type: 1},
+  {buttonId: 'id2', buttonText: {displayText: 'Button 2'}, type: 1},
+  {buttonId: 'id3', buttonText: {displayText: 'Button 3'}, type: 1}
+]
+
+const buttonMessage = {
+    text: "Hi it's button message",
+    footerText: 'Hello World',
+    buttons: buttons,
+    headerType: 1
+}
+
+const sendMsg = await conn.sendMessage(id, buttonMessage)
 ```
 
 ### Media Messages
@@ -317,6 +333,23 @@ await conn.sendMessage(
     { audio: { url: "./Media/audio.mp3" }, mimetype: 'audio/mp4' }
     { url: "Media/audio.mp3" }, // can send mp3, mp4, & ogg
 )
+
+// send a buttons message with image header!
+const buttons = [
+  {buttonId: 'id1', buttonText: {displayText: 'Button 1'}, type: 1},
+  {buttonId: 'id2', buttonText: {displayText: 'Button 2'}, type: 1},
+  {buttonId: 'id3', buttonText: {displayText: 'Button 3'}, type: 1}
+]
+
+const buttonMessage = {
+    image: {url: url},
+    caption: "Hi it's button message",
+    footerText: 'Hello World',
+    buttons: buttons,
+    headerType: 4
+}
+
+const sendMsg = await conn.sendMessage(id, buttonMessage)
 ```
 
 ### Notes
@@ -541,6 +574,10 @@ Of course, replace ``` xyz ``` with an actual ID.
 - To change the group's subject
     ``` ts
     await conn.groupUpdateSubject("abcd-xyz@g.us", "New Subject!")
+    ```
+- To change the group's description
+    ``` ts
+    await conn.groupUpdateDescription("abcd-xyz@g.us", "New Description!")
     ```
 - To change group settings
     ``` ts

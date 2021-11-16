@@ -52,7 +52,7 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 			)
 			return extractGroupMetadata(result)
 		},
-		groupLeave: async(jid: string) => {
+		groupLeave: async(id: string) => {
 			await groupQuery(
 				'@g.us',
 				'set',
@@ -61,7 +61,7 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 						tag: 'leave',
 						attrs: { },
 						content: [
-							{ tag: 'group', attrs: { jid } }
+							{ tag: 'group', attrs: { id } }
 						]
 					}
 				]
@@ -100,10 +100,39 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 			const participantsAffected = getBinaryNodeChildren(node!, 'participant')
 			return participantsAffected.map(p => p.attrs.jid)
 		},
+		groupUpdateDescription: async(jid: string, description?: string) => {
+			const metadata = await groupMetadata(jid);
+			const prev = metadata.descId ?? null;
+
+			await groupQuery(
+				jid,
+				'set',
+				[
+					{
+						tag: 'description',
+						attrs: {
+							...( description ? { id: generateMessageID() } : { delete: 'true' } ),
+							...(prev ? { prev } : {})
+						},
+						content: description ? [{tag: 'body', attrs: {}, content: Buffer.from(description, 'utf-8')}] : null
+					}
+				]
+			)
+		},
 		groupInviteCode: async(jid: string) => {
 			const result = await groupQuery(jid, 'get', [{ tag: 'invite', attrs: {} }])
 			const inviteNode = getBinaryNodeChild(result, 'invite')
 			return inviteNode.attrs.code
+		},
+	        groupRevokeInvite: async (jid: string) => {
+			const result = await groupQuery(jid, 'set', [{ tag: 'invite', attrs: {} }])
+			const inviteNode = getBinaryNodeChild(result, 'invite')
+			return inviteNode.attrs.code
+		},
+		groupAcceptInvite: async (code: string) => {
+			const results = await groupQuery('@g.us', 'set', [{ tag: 'invite', attrs: { code } }])
+			const result = getBinaryNodeChild(results, 'group')
+			return result.attrs.jid
 		},
 		groupToggleEphemeral: async(jid: string, ephemeralExpiration: number) => {
 			const content: BinaryNode = ephemeralExpiration ? 
