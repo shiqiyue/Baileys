@@ -8,14 +8,15 @@ const loadState = () => {
     let state: AuthenticationState | undefined = undefined
     try {
         const value = JSON.parse(
-            readFileSync('./auth_info_multi.json', { encoding: 'utf-8' }), 
+            readFileSync('./auth_info_multi.json', { encoding: 'utf-8' }),
             BufferJSON.reviver
         )
-        state = { 
-            creds: value.creds, 
+
+        state = {
+            creds: value.creds,
             // stores pre-keys, session & other keys in a JSON object
             // we deserialize it here
-            keys: initInMemoryKeyStore(value.keys) 
+            keys: initInMemoryKeyStore(value.keys)
         }
     } catch{  }
     return state
@@ -24,7 +25,7 @@ const loadState = () => {
 const saveState = (state: any | undefined) => {
     console.log('saving auth state')
     writeFileSync(
-        './auth_info_multi.json', 
+        './auth_info_multi.json',
         // BufferJSON replacer utility saves buffers nicely
         JSON.stringify(state, BufferJSON.replacer, 2)
     )
@@ -49,17 +50,17 @@ const startSock = () => {
 
         await sock.sendMessage(jid, msg)
     }
-    
+
     sock.ev.on('messages.upsert', async m => {
         console.log(JSON.stringify(m, undefined, 2))
-        
+
         const msg = m.messages[0]
         if(!msg.key.fromMe && m.type === 'notify') {
             console.log('replying to', m.messages[0].key.remoteJid)
             await sock!.sendReadReceipt(msg.key.remoteJid, msg.key.participant, [msg.key.id])
             await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid)
         }
-        
+
     })
 
     sock.ev.on('messages.update', m => console.log(m))
@@ -77,7 +78,7 @@ const startSock = () => {
                 console.log('connection closed')
             }
         }
-        
+
         console.log('connection update', update)
     })
     // listen for when the auth state is updated

@@ -15,10 +15,10 @@ import { assertNodeErrorFree, BinaryNode, encodeBinaryNode, S_WHATSAPP_NET } fro
  * - query phone connection
  */
 export const makeSocket = ({
-    waWebSocketUrl, 
-    connectTimeoutMs, 
-    logger, 
-    agent, 
+    waWebSocketUrl,
+    connectTimeoutMs,
+    logger,
+    agent,
     keepAliveIntervalMs,
     version,
     browser,
@@ -46,7 +46,7 @@ export const makeSocket = ({
     const authState = initialAuthState || initAuthState()
     const { creds } = authState
     const ev = new EventEmitter() as BaileysEventEmitter
-	
+
     let lastDateRecv: Date
 	let epoch = 0
 	let keepAliveReq: NodeJS.Timeout
@@ -110,7 +110,7 @@ export const makeSocket = ({
                     onErr = err => {
                         reject(err || new Boom('Connection Closed', { statusCode: DisconnectReason.connectionClosed }))
                     }
-                    
+
                     ws.on(`TAG:${msgId}`, onRecv)
                     ws.on('close', onErr) // if the socket closes, you'll never receive the message
                 },
@@ -223,7 +223,7 @@ export const makeSocket = ({
                 if(logger.level === 'trace') {
                     logger.trace({ msgId, fromMe: false, frame }, 'communication')
                 }
-    
+
                 let anyTriggered = false
                 /* Check if this is a response to a message we sent */
                 anyTriggered = ws.emit(`${DEF_TAG_PREFIX}${msgId}`, frame)
@@ -231,7 +231,7 @@ export const makeSocket = ({
                 const l0 = frame.tag
                 const l1 = frame.attrs || { }
                 const l2 = Array.isArray(frame.content) ? frame.content[0]?.tag : ''
-    
+
                 Object.keys(l1).forEach(key => {
                     anyTriggered = ws.emit(`${DEF_CALLBACK_PREFIX}${l0},${key}:${l1[key]},${l2}`, frame) || anyTriggered
                     anyTriggered = ws.emit(`${DEF_CALLBACK_PREFIX}${l0},${key}:${l1[key]}`, frame) || anyTriggered
@@ -240,7 +240,7 @@ export const makeSocket = ({
                 anyTriggered = ws.emit(`${DEF_CALLBACK_PREFIX}${l0},,${l2}`, frame) || anyTriggered
                 anyTriggered = ws.emit(`${DEF_CALLBACK_PREFIX}${l0}`, frame) || anyTriggered
                 anyTriggered = ws.emit('frame', frame) || anyTriggered
-    
+
                 if (!anyTriggered && logger.level === 'debug') {
                     logger.debug({ unhandled: true, msgId, fromMe: false, frame }, 'communication recv')
                 }
@@ -262,12 +262,12 @@ export const makeSocket = ({
             try { ws.close() } catch { }
         }
 
-        ev.emit('connection.update', { 
-            connection: 'close', 
+        ev.emit('connection.update', {
+            connection: 'close',
             lastDisconnect: {
                 error,
                 date: new Date()
-            } 
+            }
         })
         ws.removeAllListeners('connection.update')
 	}
@@ -370,7 +370,7 @@ export const makeSocket = ({
         let listener: (item: Partial<ConnectionState>) => void
         await (
             promiseTimeout(
-                timeoutMs, 
+                timeoutMs,
                 (resolve, reject) => {
                     listener = (update) => {
                         if(check(update)) {
@@ -407,8 +407,8 @@ export const makeSocket = ({
             }
         }
 
-        const iq: BinaryNode = { 
-            tag: 'iq', 
+        const iq: BinaryNode = {
+            tag: 'iq',
             attrs: {
                 to: S_WHATSAPP_NET,
                 type: 'result',
@@ -424,6 +424,7 @@ export const makeSocket = ({
 
         let qrMs = 60_000 // time to let a QR live
         const genPairQR = () => {
+            logger.info("genPairQR start")
             const ref = refs.shift()
             if(!ref) {
                 end(new Boom('QR refs attempts ended', { statusCode: DisconnectReason.restartRequired }))
@@ -431,7 +432,8 @@ export const makeSocket = ({
             }
 
             const qr = [ref, noiseKeyB64, identityKeyB64, advB64].join(',')
-    
+            logger.info("genPairQR end", qr)
+
             ev.emit('connection.update', { qr })
             postQR(qr)
 
