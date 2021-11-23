@@ -4,14 +4,16 @@ import { decodeMessageStanza, encodeBigEndian, toNumber, downloadHistory, genera
 import { BinaryNode, jidDecode, jidEncode, isJidStatusBroadcast, areJidsSameUser, getBinaryNodeChildren, jidNormalizedUser, getAllBinaryNodeChildren, BinaryNodeAttributes } from '../WABinary'
 import { proto } from "../../WAProto"
 import { KEY_BUNDLE_TYPE } from "../Defaults"
-import { makeMessagesSocket } from "./messages-send"
+import { makeChatsSocket } from "./chats"
 import { extractGroupMetadata } from "./groups"
+
+const CALL_TAGS_TO_ACK = ['terminate', 'relaylatency', 'offer']
 
 const isReadReceipt = (type: string) => type === 'read' || type === 'read-self'
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const { logger } = config
-	const sock = makeMessagesSocket(config)
+	const sock = makeChatsSocket(config)
 	const { 
 		ev,
         authState,
@@ -20,6 +22,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		sendNode,
         relayMessage,
         sendDeliveryReceipt,
+        resyncMainAppState,
 	} = sock
 
     const msgRetryMap = config.msgRetryCounterMap || { }
@@ -157,15 +160,18 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                     logger.info({ with: message.key.remoteJid! }, 'shared key')
                 break
                 case proto.ProtocolMessage.ProtocolMessageType.APP_STATE_SYNC_KEY_SHARE:
+                    let newAppStateSyncKeyId = ''
                     for(const { keyData, keyId } of protocolMsg.appStateSyncKeyShare!.keys || []) {
                         const str = Buffer.from(keyId.keyId!).toString('base64')
                         logger.info({ str }, 'injecting new app state sync key')
                         await authState.keys.setAppStateSyncKey(str, keyData)
 
-                        authState.creds.myAppStateKeyId = str
+                        newAppStateSyncKeyId = str
                     }
                     
-                    ev.emit('auth-state.update', authState)
+                    ev.emit('creds.update', { myAppStateKeyId: newAppStateSyncKeyId })
+
+                    resyncMainAppState()
                 break
                 case proto.ProtocolMessage.ProtocolMessageType.REVOKE:
                     ev.emit('messages.update', [
@@ -277,8 +283,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             switch(child?.tag) {
                 case 'create':
                     const metadata = extractGroupMetadata(child)
+
                     result.messageStubType = WAMessageStubType.GROUP_CREATE
                     result.messageStubParameters = [metadata.subject]
+                    result.key = {
+                        participant: jidNormalizedUser(metadata.owner)
+                    }
 
                     ev.emit('chats.upsert', [{
                         id: metadata.id,
@@ -303,7 +313,18 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                 case 'leave':
                     const stubType = `GROUP_PARTICIPANT_${child.tag!.toUpperCase()}`
                     result.messageStubType = WAMessageStubType[stubType]
-                    result.messageStubParameters = getBinaryNodeChildren(child, 'participant').map(p => p.attrs.jid)
+
+                    const participants = getBinaryNodeChildren(child, 'participant').map(p => p.attrs.jid)
+                    if(
+                        participants.length === 1 && 
+                        // if recv. "remove" message and sender removed themselves
+                        // mark as left
+                        areJidsSameUser(participants[0], node.attrs.participant) &&
+                        child.tag === 'remove'
+                    ) {
+                        result.messageStubType = WAMessageStubType.GROUP_PARTICIPANT_LEAVE
+                    }
+                    result.messageStubParameters = participants
                     break
                 case 'subject':
                     result.messageStubType = WAMessageStubType.GROUP_CHANGE_SUBJECT
@@ -323,12 +344,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             }
         } else {
             switch(child.tag) {
-                case 'count':
-                    if(child.attrs.value === '0') {
-                        logger.info('recv all pending notifications')
-                        ev.emit('connection.update', { receivedPendingNotifications: true })
-                    }
-                break
                 case 'devices':
                     const devices = getBinaryNodeChildren(child, 'device')
                     if(areJidsSameUser(child.attrs.jid, authState.creds!.me!.id)) {
@@ -360,9 +375,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             id: dec.msgId,
             participant: dec.participant
         }
+        const partialMsg: Partial<proto.IWebMessageInfo> = {
+            messageTimestamp: dec.timestamp,
+            pushName: dec.pushname
+        }
         // if there were some successful decryptions
         if(dec.successes.length) {
-            ev.emit('auth-state.update', authState)
             // send message receipt
             let recpAttrs: { [_: string]: any }
             if(isMe) {
@@ -404,9 +422,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                 key,
                 message,
                 status: isMe ? proto.WebMessageInfo.WebMessageInfoStatus.SERVER_ACK : null,
-                messageTimestamp: dec.timestamp,
-                pushName: dec.pushname,
-                participant: dec.participant
+                ...partialMsg
             })
         }
         
@@ -420,17 +436,22 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             fullMessages.push({
                 key,
                 messageStubType: WAMessageStubType.CIPHERTEXT,
-                messageStubParameters: [error.message]
+                messageStubParameters: [error.message],
+                ...partialMsg
             })
         }
 
-        ev.emit(
-            'messages.upsert', 
-            { 
-                messages: fullMessages.map(m => proto.WebMessageInfo.fromObject(m)), 
-                type: stanza.attrs.offline ? 'append' : 'notify' 
-            }
-        )
+        if(fullMessages.length) {
+            ev.emit(
+                'messages.upsert', 
+                { 
+                    messages: fullMessages.map(m => proto.WebMessageInfo.fromObject(m)), 
+                    type: stanza.attrs.offline ? 'append' : 'notify' 
+                }
+            )
+        } else {
+            logger.warn({ stanza }, `received node with 0 messages`)
+        }
     })
 
     ws.on('CB:ack,class:message', async(node: BinaryNode) => {
@@ -449,7 +470,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
         logger.info({ node }, 'recv call')
 
         const [child] = getAllBinaryNodeChildren(node)
-        if(child.tag === 'terminate' || child.tag === 'relaylatency') {
+        if(CALL_TAGS_TO_ACK.includes(child.tag)) {
             await sendMessageAck(node, { class: 'call', type: child.tag })
         }
     })
@@ -491,7 +512,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                 remoteJid: node.attrs.from,
                 fromMe,
                 participant: node.attrs.participant,
-                id: node.attrs.id
+                id: node.attrs.id,
+                ...(msg.key || {})
             }
             msg.messageTimestamp = +node.attrs.t
             
@@ -509,8 +531,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                 contactNameUpdates[jid] = msg.pushName
                 // update our pushname too
                 if(msg.key.fromMe && authState.creds.me?.name !== msg.pushName) {
-                    authState.creds.me!.name = msg.pushName
-                    ev.emit('auth-state.update', authState)
+                    ev.emit('creds.update', { me: { ...authState.creds.me!, name: msg.pushName! } })
                 }
             }
 
