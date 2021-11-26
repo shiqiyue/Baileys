@@ -7,8 +7,6 @@ import { KEY_BUNDLE_TYPE } from "../Defaults"
 import { makeChatsSocket } from "./chats"
 import { extractGroupMetadata } from "./groups"
 
-const CALL_TAGS_TO_ACK = ['terminate', 'relaylatency', 'offer']
-
 const isReadReceipt = (type: string) => type === 'read' || type === 'read-self'
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
@@ -133,45 +131,25 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
                         }
                     })
                     break
-                case proto.ProtocolMessage.ProtocolMessageType.APP_STATE_SYNC_KEY_REQUEST:
-                    const keys = await Promise.all(
-                        protocolMsg.appStateSyncKeyRequest!.keyIds!.map(
-                            async id => {
-                                const keyId = Buffer.from(id.keyId!).toString('base64')
-                                const keyData = await authState.keys.getAppStateSyncKey(keyId)
-                                logger.info({ keyId }, 'received key request')
-                                return {
-                                    keyId: id,
-                                    keyData
-                                }
-                            }
-                        )
-                    )
-                    
-                    const msg: proto.IMessage = {
-                        protocolMessage: {
-                            type: proto.ProtocolMessage.ProtocolMessageType.APP_STATE_SYNC_KEY_SHARE,
-                            appStateSyncKeyShare: {
-                                keys
-                            }
-                        }
-                    }
-                    await relayMessage(message.key.remoteJid!, msg, { })
-                    logger.info({ with: message.key.remoteJid! }, 'shared key')
-                break
                 case proto.ProtocolMessage.ProtocolMessageType.APP_STATE_SYNC_KEY_SHARE:
-                    let newAppStateSyncKeyId = ''
-                    for(const { keyData, keyId } of protocolMsg.appStateSyncKeyShare!.keys || []) {
-                        const str = Buffer.from(keyId.keyId!).toString('base64')
-                        logger.info({ str }, 'injecting new app state sync key')
-                        await authState.keys.setAppStateSyncKey(str, keyData)
-
-                        newAppStateSyncKeyId = str
-                    }
-                    
-                    ev.emit('creds.update', { myAppStateKeyId: newAppStateSyncKeyId })
-
-                    resyncMainAppState()
+                    const keys = protocolMsg.appStateSyncKeyShare!.keys
+                    if(keys?.length) {
+                        let newAppStateSyncKeyId = ''
+                        for(const { keyData, keyId } of keys) {
+                            const str = Buffer.from(keyId.keyId!).toString('base64')
+                            
+                            logger.info({ str }, 'injecting new app state sync key')
+                            await authState.keys.setAppStateSyncKey(str, keyData)
+    
+                            newAppStateSyncKeyId = str
+                        }
+                        
+                        ev.emit('creds.update', { myAppStateKeyId: newAppStateSyncKeyId })
+    
+                        resyncMainAppState()
+                    } else [
+                        logger.info({ protocolMsg }, 'recv app state sync with 0 keys')
+                    ]
                 break
                 case proto.ProtocolMessage.ProtocolMessageType.REVOKE:
                     ev.emit('messages.update', [
@@ -379,6 +357,11 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
             messageTimestamp: dec.timestamp,
             pushName: dec.pushname
         }
+
+        if(!dec.failures.length) {
+            await sendMessageAck(stanza, { class: 'receipt' })
+        }
+        
         // if there were some successful decryptions
         if(dec.successes.length) {
             // send message receipt
@@ -409,8 +392,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
             await sendNode({ tag: 'receipt', attrs: recpAttrs })
             logger.debug({ msgId: dec.msgId }, 'sent message receipt')
-
-            await sendMessageAck(stanza, { class: 'receipt' })
 
             await sendDeliveryReceipt(dec.chatId, dec.participant, [dec.msgId])
             logger.debug({ msgId: dec.msgId }, 'sent delivery receipt')
@@ -470,7 +451,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
         logger.info({ node }, 'recv call')
 
         const [child] = getAllBinaryNodeChildren(node)
-        if(CALL_TAGS_TO_ACK.includes(child.tag)) {
+        if(!!child?.tag) {
             await sendMessageAck(node, { class: 'call', type: child.tag })
         }
     })

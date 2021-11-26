@@ -25,6 +25,7 @@ export const makeSocket = ({
     browser,
     auth: initialAuthState,
     printQRInTerminal,
+    defaultQueryTimeoutMs
 }: SocketConfig) => {
 	const ws = new WebSocket(waWebSocketUrl, undefined, {
 		origin: DEFAULT_ORIGIN,
@@ -110,7 +111,7 @@ export const makeSocket = ({
      * @param json query that was sent
      * @param timeoutMs timeout after which the promise will reject
      */
-	 const waitForMessage = async(msgId: string, timeoutMs?: number) => {
+	 const waitForMessage = async(msgId: string, timeoutMs = defaultQueryTimeoutMs) => {
         let onRecv: (json) => void
         let onErr: (err) => void
         try {
@@ -123,12 +124,14 @@ export const makeSocket = ({
                     
                     ws.on(`TAG:${msgId}`, onRecv)
                     ws.on('close', onErr) // if the socket closes, you'll never receive the message
+                    ws.off('error', onErr)
                 },
             )
             return result as any
         } finally {
             ws.off(`TAG:${msgId}`, onRecv)
             ws.off('close', onErr) // if the socket closes, you'll never receive the message
+            ws.off('error', onErr)
         }
     }
     /** send a query, and wait for its response. auto-generates message ID if not provided */

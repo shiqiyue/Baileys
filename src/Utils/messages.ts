@@ -131,7 +131,8 @@ export const prepareWAMessageMedia = async(
 		.filter(Boolean)
 	)
 	delete uploadData.media
-	const content = {
+
+	const obj = WAProto.Message.fromObject({
 		[`${mediaType}Message`]: MessageTypeProto[mediaType].fromObject(
 			{
 				url: mediaUrl,
@@ -143,10 +144,10 @@ export const prepareWAMessageMedia = async(
 				...uploadData
 			}
 		)
-	}
-	const obj = WAProto.Message.fromObject(content)
+	})
+
 	if(cacheableKey) {
-		options.mediaCache!.set(cacheableKey, WAProto.Message.encode(obj))
+		options.mediaCache!.set(cacheableKey, WAProto.Message.encode(obj).finish())
 	}
 
 	return obj
